@@ -145,13 +145,9 @@ class A2CAgent(object):
 
     # 액터 신경망에서 행동 샘플링
     def get_action(self, state):
-        mu_a, std_a = self.actor(state)
-        """
-        mu_a = mu_a.cpu().detach().numpy()[0]
-        std_a = std_a.cpu().detach().numpy()[0]
-        std_a = np.clip(std_a, self.std_bound[0], self.std_bound[1])
-        action = np.random.normal(mu_a, std_a, size=self.action_dim)
-        """
+        with torch.no_grad():
+            mu_a, std_a = self.actor(state)
+
         std_a = torch.clip(std_a, self.std_bound[0], self.std_bound[1])
         action = torch.normal(mu_a.item(), std_a.item(), size=(self.action_dim,))
 
@@ -194,8 +190,8 @@ class A2CAgent(object):
 
     ## 신경망 파라미터 로드
     def load_weights(self, path):
-        self.actor.load_weights(path + 'pendulum_actor.pt')
-        self.critic.load_weights(path + 'pendulum_critic.pt')
+        self.actor.load_state_dict(torch.load(path + 'pendulum_actor.pt'))
+        self.critic.load_state_dict(torch.load(path + 'pendulum_critic.pt'))
 
 
     # 배치에 저장된 데이터 추출
@@ -221,7 +217,8 @@ class A2CAgent(object):
                 # self.env.render()  # 이거 말고, gym 만들때 human_mode 로 해야 함
 
                 # 행동 샘플링
-                action = self.get_action(torch.FloatTensor([state]).to(self.device))
+                #action = self.get_action(torch.FloatTensor([state]).to(self.device))
+                action = self.get_action(torch.FloatTensor(state).to(self.device))
                 # 행동 범위 클리핑
                 action = torch.clip(action, -self.action_bound, self.action_bound)
                 # 다음 상태, 보상 관측
@@ -268,16 +265,17 @@ class A2CAgent(object):
                 batch_state, batch_action, batch_reward, batch_next_state, batch_done = [], [], [], [], []
 
                 # 시간차 타깃 계산
-                next_v_values = self.critic(torch.FloatTensor(next_states).to(self.device))
+                with torch.no_grad():
+                    next_v_values = self.critic(torch.FloatTensor(next_states).to(self.device))
                 td_targets = self.td_target(torch.FloatTensor(train_rewards).to(self.device), next_v_values, dones)
 
                 # 크리틱 신경망 업데이트
                 self.critic_learn(torch.FloatTensor(states).to(self.device), td_targets)
 
-
                 # 어드밴티지 계산
-                v_values = self.critic(torch.FloatTensor(states).to(self.device))
-                next_v_values = self.critic(torch.FloatTensor(next_states).to(self.device))
+                with torch.no_grad():
+                    v_values = self.critic(torch.FloatTensor(states).to(self.device))
+                    next_v_values = self.critic(torch.FloatTensor(next_states).to(self.device))
                 advantages = torch.FloatTensor(train_rewards).to(self.device) + self.GAMMA * next_v_values - v_values
 
                 # actor 신경망 업데이트
@@ -285,8 +283,6 @@ class A2CAgent(object):
                                  torch.FloatTensor(actions).to(self.device),
                                  advantages)
 
-
-                ##################################
                 # 상태 업데이트
                 state = next_state[0]
                 episode_reward += reward[0]
